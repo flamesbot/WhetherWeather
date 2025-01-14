@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather & Location App</title>
+    <!-- Add Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .weather-card {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .history-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            border: 1px solid red;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .location-buttons {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #e0e0e0;
+        }
+        .loading {
+            display: none;
+            margin-left: 10px;
+        }
+        #map {
+            height: 400px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        .leaflet-popup-content {
+            margin: 10px;
+        }
+        .map-container {
+            grid-column: 1 / -1;
+        }
+    </style>
+</head>
+<body>
+    <h1>Weather & Location App</h1>
+    
+    <div class="location-buttons">
+        <button onclick="getGeolocation()">Use My Location</button>
+        <span id="loading" class="loading">Getting location...</span>
+    </div>
+
+    <div>
+        <input type="text" id="locationInput" placeholder="Or enter location manually">
+        <button onclick="getWeather()">Get Weather</button>
+    </div>
+
+    <div class="container">
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+        
+        <div>
+            <div id="currentWeather" class="weather-card"></div>
+            <div id="errorDisplay"></div>
+        </div>
+        
+        <div>
+            <h2>History</h2>
+            <div id="weatherHistory"></div>
+        </div>
+    </div>
+
+    <!-- Add Leaflet JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script>
+        let map;
+        let currentMarker;
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        // Initialize map when page loads
+        document.addEventListener('DOMContentLoaded', initMap);
+
+        function updateMap(lat, lon, weatherData) {
+            // Remove existing marker if any
+            if (currentMarker) {
+                map.removeLayer(currentMarker);
+            }
+
+            // Create weather icon
+            const weatherIcon = L.divIcon({
+                className: 'weather-icon',
+                html: `<div style="font-size: 24px;">🌡️</div>`,
+                iconSize: [50, 50]
+            });
+
+            // Add new marker
+            currentMarker = L.marker([lat, lon], { icon: weatherIcon }).addTo(map);
+
+            // Create popup content
+            const popupContent = `
+                <strong>${weatherData.name}</strong><br>
+                Temperature: ${weatherData.main.temp}°C<br>
+                Conditions: ${weatherData.weather[0].description}<br>
+                Humidity: ${weatherData.main.humidity}%
+            `;
+
+            // Add popup to marker
+            currentMarker.bindPopup(popupContent).openPopup();
+
+            // Center map on location
+            map.setView([lat, lon], 10);
+        }
+
+        async function getGeolocation() {
+            const loading = document.getElementById('loading');
+            const errorDisplay = document.getElementById('errorDisplay');
+            
+            if (!navigator.geolocation) {
+                errorDisplay.innerHTML = '<div class="error">Geolocation is not supported by your browser</div>';
+                return;
+            }
+
+            loading.style.display = 'inline';
+            errorDisplay.innerHTML = '';
+
+            try {
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,
+                        timeout: 5000,
+                        maximumAge: 0
+                    });
+                });
+
+                const { latitude, longitude } = position.coords;
+                console.log('Got coordinates:', latitude, longitude);
+                
+                const weatherUrl = `/api/weather/coords/${latitude}/${longitude}`;
+                const response = await fetch(weatherUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                updateWeatherDisplay(data);
+                updateMap(latitude, longitude, data);
+            } catch (error) {
+                console.error('Error:', error);
+                errorDisplay.innerHTML = `
+                    <div class="error">
+                        ${error.message === 'User denied Geolocation' 
+                            ? 'Please enable location access to use this feature' 
+                            : 'Error getting location: ' + error.message}
+                    </div>
+                `;
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        async function getWeather() {
+            const location = document.getElementById('locationInput').value;
+            const errorDisplay = document.getElementById('errorDisplay');
+            
+            if (!location) {
+                errorDisplay.innerHTML = '<div class="error">Please enter a location</div>';
+                return;
+            }
+
+            try {
+                const weatherUrl = `/api/weather/${encodeURIComponent(location)}`;
+                const response = await fetch(weatherUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                updateWeatherDisplay(data);
+                updateMap(data.coord.lat, data.coord.lon, data);
+            } catch (error) {
+                console.error('Error:', error);
+                errorDisplay.innerHTML = `
+                    <div class="error">
+                        Error fetching weather data: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function updateWeatherDisplay(data) {
+            document.getElementById('currentWeather').innerHTML = `
+                <h3>${data.name}</h3>
+                <p>Temperature: ${data.main.temp}°C</p>
+                <p>Conditions: ${data.weather[0].description}</p>
+                <p>Humidity: ${data.main.humidity}%</p>
+                <p>Wind Speed: ${data.wind.speed} m/s</p>
+            `;
+
+            getHistoryData(data.name);
+        }
+
+        async function getHistoryData(location) {
+            try {
+                const historyResponse = await fetch(`/api/history/${encodeURIComponent(location)}`);
+                const historyData = await historyResponse.json();
+                
+                const historyHtml = historyData.map(item => `
+                    <div class="history-item">
+                        <p>${new Date(item.timestamp).toLocaleString()}</p>
+                        <p>Temperature: ${item.temperature}°C</p>
+                        <p>Conditions: ${item.conditions}</p>
+                    </div>
+                `).join('');
+                
+                document.getElementById('weatherHistory').innerHTML = historyHtml;
+            } catch (error) {
+                console.error('History error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
